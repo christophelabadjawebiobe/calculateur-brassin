@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =====================================================================
+   Charte graphique « La Badjawe » : jetons de couleur, typographies, en-tête
+   ===================================================================== */
+:root {
+  --brand: #012735;          /* bleu nuit : fond d'en-tête */
+  --brand-2: #D6AD00;        /* jaune ambré : accent, bordures, boutons primaires */
+  --brand-ink: #FFFFFF;
+  --bg: #F8F9F4;             /* fond de page */
+  --surface: #FFFFFF;        /* cartes et conteneurs */
+  --surface-2: #EDF0E6;      /* surfaces secondaires, entêtes de tableaux */
+  --ink: #012735;            /* texte principal */
+  --muted: #4A626C;          /* texte secondaire */
+  --line: rgba(1, 39, 53, 0.15);
+  --accent: #D6AD00;
+  --accent-ink: #012735;
+  --accent-soft: #F7ECBD;
+  --accent-text: #7A6100;
+  --warn: #8F5C00; --warn-soft: #FBEED0;
+  --bad: #A22E22;  --bad-soft: #F7DDD8;
+  --good: #2F6B3C; --good-soft: #E2F0E4;
+  --focus: #012735;
+  --font-display: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  color-scheme: light;
+}
+
+html { background: var(--bg); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { font-family: var(--font-display); color: var(--ink); }
+a { color: inherit; }
+button, input, select, textarea { font: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- En-tête collant (toutes les pages) ---------- */
+.site-header {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--brand); color: var(--brand-ink);
+  border-bottom: 3px solid var(--brand-2);
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.site-header-in {
+  max-width: 1320px; margin: 0 auto;
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 24px;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+}
+.site-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; min-width: 0; text-decoration: none; color: inherit; }
+.site-logo { display: block; height: 52px; width: auto; flex: 0 0 auto; background: #fff; border-radius: 6px; padding: 3px; }
+.site-brand-txt { display: flex; flex-direction: column; min-width: 0; }
+.site-kicker { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--brand-2); line-height: 1.2; }
+.site-title { font-family: var(--font-display); font-size: 19px; font-weight: 600; letter-spacing: -.01em; color: var(--brand-ink); line-height: 1.2; }
+.site-sub { font-size: 12px; color: rgba(255, 255, 255, .78); }
+.site-tabs { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.site-spacer { flex: 1 1 auto; }
+.site-tab {
+  appearance: none; background: none; border: 0; border-bottom: 3px solid transparent; margin-bottom: -3px;
+  padding: 10px 14px 9px; cursor: pointer; font-weight: 500; color: rgba(255, 255, 255, .72); white-space: nowrap; text-decoration: none;
+}
+.site-tab:hover { color: #fff; }
+.site-tab[aria-selected="true"], .site-tab.is-active { color: #fff; border-bottom-color: var(--brand-2); }
+.site-tab .x { display: inline; }
+.site-tab[hidden] { display: none !important; }
+.site-tab:focus-visible, .site-header a:focus-visible, .site-header button:focus-visible { outline: 2px solid var(--brand-2); outline-offset: -2px; }
+.site-right { margin-left: auto; display: flex; align-items: center; gap: 10px; padding-bottom: 8px; flex-wrap: wrap; }
+.site-state { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgba(255, 255, 255, .78); }
+.site-state .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand-2); }
+.site-state.off .dot { background: #fff; opacity: .55; }
+.site-who { font-size: 12px; color: rgba(255, 255, 255, .78); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-role { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--brand-2); color: var(--brand-2); white-space: nowrap; }
+.site-role.ro { background: var(--brand-2); color: #012735; }
+.site-btn {
+  appearance: none; background: transparent; border: 1px solid rgba(255, 255, 255, .5); color: #fff; border-radius: 4px;
+  height: 28px; padding: 0 10px; font-size: 13px; cursor: pointer; white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center;
+}
+.site-btn:hover { border-color: #fff; }
+.site-btn.primary { background: var(--brand-2); border-color: var(--brand-2); color: #012735; font-weight: 600; }
+@media (max-width: 640px) {
+  .site-header-in { padding-top: 8px; }
+  .site-logo { height: 40px; }
+  .site-tab .x { display: none; }
+  .site-sub, .site-state, .site-who, .site-role { display: none; }
+  .site-tabs { flex: 1 1 100%; order: 3; }
+  .site-tab { flex: 1 1 0; padding: 10px 8px 9px; text-align: center; }
+  .site-right { order: 2; }
+}
+
+/* ---------- Page de connexion ---------- */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--brand); }
+.login-card {
+  width: 100%; max-width: 380px; background: var(--surface); color: var(--ink); border-radius: 8px;
+  border-top: 4px solid var(--brand-2); padding: 26px 24px 22px; box-shadow: 0 10px 40px rgba(0, 0, 0, .35);
+}
+.login-logo { display: block; height: 96px; width: auto; margin: 0 auto 10px; }
+.login-kicker { display: block; text-align: center; font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-text); }
+.login-card h1 { font-size: 20px; text-align: center; margin: 4px 0 2px; font-weight: 600; }
+.login-sub { display: block; text-align: center; color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+.login-card label { display: block; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
+.login-card input { width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.login-card input:focus { border-color: var(--brand); }
+.login-btn {
+  width: 100%; margin-top: 16px; height: 40px; border-radius: 4px; border: 1px solid var(--brand-2); background: var(--brand-2);
+  color: #012735; font-weight: 600; cursor: pointer;
+}
+.login-btn:hover { filter: brightness(1.07); }
+.login-btn:disabled { opacity: .6; cursor: wait; }
+.login-err { min-height: 18px; margin-top: 10px; font-size: 13px; color: var(--bad); }
+.login-note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 6px; }
+
+/* ---------- Tableau de bord ---------- */
+.dash-main { max-width: 1100px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
+.dash-main h1 { font-size: 26px; font-weight: 600; margin: 0 0 2px; }
+.dash-lead { margin: 0 0 22px; color: var(--muted); }
+.dash-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.dash-tile {
+  display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 150px; padding: 18px 16px;
+  background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--brand-2); border-radius: 6px; text-decoration: none;
+  transition: box-shadow .15s, transform .15s, border-color .15s;
+}
+.dash-tile:hover { box-shadow: 0 6px 18px rgba(1, 39, 53, .12); transform: translateY(-2px); border-color: var(--brand); border-top-color: var(--brand-2); }
+.dash-ico { font-size: 34px; line-height: 1; margin-bottom: 4px; }
+.dash-name { font-family: var(--font-display); font-weight: 600; font-size: 17px; color: var(--ink); }
+.dash-desc { font-size: 13px; color: var(--muted); }
+.dash-empty { padding: 24px; text-align: center; background: var(--surface); border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); }
