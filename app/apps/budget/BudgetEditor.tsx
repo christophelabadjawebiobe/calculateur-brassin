@@ -37,7 +37,7 @@ export default function BudgetEditor({ canEdit }: { canEdit: boolean }) {
     if (v.error) throw v.error;
     const map = new Map<string, Line>();
     (l.data ?? []).forEach((r) => {
-      const k = keyOf(r as Line);
+      const k = keyOf(r as any);
       if (!map.has(k)) map.set(k, { category: r.category as CategoryCode, label: r.label, amounts: zeros() });
       map.get(k)!.amounts[r.month - 1] = num(r.amount);
     });
