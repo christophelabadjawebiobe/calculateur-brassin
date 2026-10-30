@@ -15,3 +15,12 @@ export type AppRow = {
   description?: string | null;
   icon?: string | null;
 };
+
+/** Applications soumises aux droits par rôle, et niveaux d'accès (sql/05_roles_permissions.sql) */
+export const APP_KEYS = ['calculateur', 'budget', 'analyse'] as const;
+export type AppKey = (typeof APP_KEYS)[number];
+export const LEVELS = ['none', 'read', 'write'] as const;
+export type Level = (typeof LEVELS)[number];
+
+/** Résultat d'une action serveur de l'administration */
+export type Result = { ok: boolean; message: string; link?: string };
