@@ -138,4 +138,73 @@ export default function UsersAdmin({ users: initial, apps, currentUserId, hasSer
     <main className="ad-wrap">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <section className="ad-card">
-        <h1>Util
+        <h1>Utilisateurs</h1>
+        <p className="ad-sub">{users.length} compte{users.length > 1 ? 's' : ''} · {nAdmin} administrateur{nAdmin > 1 ? 's' : ''}. Les modifications sont enregistrées immédiatement.</p>
+        <div className="ad-bar">
+          <input type="search" aria-label="Rechercher un utilisateur" placeholder="Rechercher (nom, e-mail)…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <select aria-label="Filtrer par rôle" value={roleF} onChange={(e) => setRoleF(e.target.value)}>
+            <option value="">Tous les rôles</option>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <p className="ad-help" style={{ marginTop: 10 }}>{ROLE_HELP}</p>
+      </section>
+
+      {!hasServiceKey ? <div className="ad-alert" role="note"><b>Clé de service absente.</b> Ajoutez <code>SUPABASE_SERVICE_ROLE_KEY</code> aux variables d’environnement (Vercel) puis redéployez pour afficher les e-mails et dernières connexions, générer des liens de réinitialisation et définir un mot de passe. L’envoi de l’e-mail de réinitialisation fonctionne déjà sans elle.</div> : null}
+      {warnings.map((w) => <div key={w} className="ad-alert bad" role="alert">{w} : exécutez <code>sql/04_admin_reel_validation.sql</code> dans Supabase (SQL Editor).</div>)}
+      <div aria-live="polite" role="status">{toast ? <div className={'ad-toast ' + (toast.ok ? 'ok' : 'ko')}>{toast.msg}</div> : null}</div>
+
+      <div className="ad-scroll">
+        <table className="ad-tbl">
+          <thead><tr><th scope="col">Utilisateur</th><th scope="col">Rôle</th><th scope="col">Accès aux applications</th><th scope="col">Dernière connexion</th><th scope="col">Mot de passe</th></tr></thead>
+          <tbody>
+            {shown.map((u) => (
+              <React.Fragment key={u.id}>
+                <tr>
+                  <td>
+                    <div className="ad-name">{u.name || u.email || u.id.slice(0, 8)}{u.id === currentUserId ? <span className="ad-badge">vous</span> : null}{!u.hasProfile ? <span className="ad-badge bad" title="Ce compte n’a pas de ligne dans la table profiles">sans profil</span> : null}{u.confirmed === false ? <span className="ad-badge bad" title="Adresse e-mail non confirmée">non confirmé</span> : null}</div>
+                    {u.name && u.email ? <div className="ad-mail">{u.email}</div> : null}
+                  </td>
+                  <td>
+                    <select className="ad-sel" aria-label={`Rôle de ${u.name || u.email}`} value={u.role} disabled={!u.hasProfile || u.id === currentUserId || busy['r' + u.id]} onChange={(e) => changeRole(u, e.target.value)} title={u.id === currentUserId ? 'Vous ne pouvez pas modifier votre propre rôle' : ''}>
+                      {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      {!(u.role in ROLE_LABEL) ? <option value={u.role}>{u.role}</option> : null}
+                    </select>
+                  </td>
+                  <td>
+                    {u.role === 'admin' ? <span className="ad-sub">Toutes (administrateur)</span> : (
+                      <div className="ad-apps" role="group" aria-label={`Applications de ${u.name || u.email}`}>
+                        {apps.map((a) => <label key={a.id}><input type="checkbox" checked={u.access.includes(a.id)} disabled={busy['a' + u.id + a.id]} onChange={(e) => toggleApp(u, a, e.target.checked)} />{a.name}</label>)}
+                        {!apps.length ? <span className="ad-sub">Aucune application</span> : null}
+                      </div>)}
+                  </td>
+                  <td>{dt(u.last)}</td>
+                  <td><button type="button" className="ad-btn" aria-expanded={pwFor === u.id} onClick={() => { setPwFor(pwFor === u.id ? null : u.id); setLink(null); setTmp(''); }}>Réinitialiser…</button></td>
+                </tr>
+                {pwFor === u.id ? (
+                  <tr className="pw"><td colSpan={5}>
+                    <div className="ad-pw">
+                      <div className="ad-pw-row">
+                        <button type="button" className="ad-btn primary" disabled={!u.email && !hasServiceKey || busy['p' + u.id]} onClick={() => reset(u, 'email')}>Envoyer l’e-mail de réinitialisation</button>
+                        <button type="button" className="ad-btn" disabled={!hasServiceKey || busy['p' + u.id]} title={hasServiceKey ? '' : 'Nécessite SUPABASE_SERVICE_ROLE_KEY'} onClick={() => reset(u, 'link')}>Générer un lien à transmettre</button>
+                      </div>
+                      {link && link.id === u.id ? (
+                        <div className="ad-pw-row"><span className="ad-help">{link.msg}</span>
+                          <input className="ad-link" type="text" readOnly aria-label="Lien de réinitialisation" value={link.url} onFocus={(e) => e.currentTarget.select()} />
+                          <button type="button" className="ad-btn" onClick={() => copy(link.url)}>Copier</button></div>) : null}
+                      <div className="ad-pw-row">
+                        <input type="password" autoComplete="new-password" aria-label="Mot de passe temporaire" placeholder="Mot de passe temporaire (8 caractères min.)" value={tmp} onChange={(e) => setTmp(e.target.value)} disabled={!hasServiceKey} />
+                        <button type="button" className="ad-btn" disabled={!hasServiceKey || tmp.length < 8 || busy['p' + u.id]} onClick={async () => { const r = await run('p' + u.id, () => setTemporaryPassword(u.id, tmp)); if (r.ok) setTmp(''); }}>Définir ce mot de passe</button>
+                      </div>
+                      <p className="ad-help">L’e-mail et le lien mènent à la page « Nouveau mot de passe » où l’utilisateur choisit lui-même son mot de passe. Le mot de passe temporaire remplace immédiatement l’ancien : transmettez-le par un canal sûr.</p>
+                    </div>
+                  </td></tr>
+                ) : null}
+              </React.Fragment>
+            ))}
+            {!shown.length ? <tr><td colSpan={5} className="ad-sub" style={{ textAlign: 'center', padding: 24 }}>Aucun utilisateur ne correspond.</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  );
+}
