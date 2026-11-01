@@ -11,6 +11,9 @@ import { useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
 import LedgerImport, { LI_CSS } from '@/components/LedgerImport';
 import Assistants, { AS_CSS } from './Assistants';
+import ScenarioDialog, { SC_CSS } from './ScenarioDialog';
+import Link from 'next/link';
+import { buildAtterrissage2026 } from '@/lib/defaults';
 import { createClient } from '@/lib/supabase/client';
 import {
   CHART, MONTHS, RES_AFTER, RES_HINT, RES_LABEL, Z12, accMonths, addTo, applyPct, cloneEntry, colVal, colsFor, emptyEntry, eur0, fmt0, leafMonths, parseNum, pctTxt, quarter, r2,
@@ -19,6 +22,9 @@ import {
 import { writeXlsx, type Cell } from '@/lib/xlsx-lite';
 
 const DEFAULT_YEAR = 2026;
+type ScenRow = { year: number; scenario: string; title: string; locked: boolean; at: string | null };
+/** identifiant technique d'un scénario : minuscules, chiffres et tirets */
+const slugify = (t: string): string => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/g, '') || 'scenario';
 const T_PLAN = 'pcmn_budget_plans', T_HIST = 'pcmn_budget_history', T_ACT = 'pcmn_actuals';
 const PREFS = 'badjawe-budget-prefs';
 
@@ -221,6 +227,15 @@ export default function BudgetPage() {
   const supabase = useMemo(() => createClient(), []);
   const [year, setYear] = useState(DEFAULT_YEAR);
   const [planYears, setPlanYears] = useState<number[]>([]);
+  const [scens, setScens] = useState<ScenRow[]>([]);
+  const [hasScen, setHasScen] = useState(true);
+  const [scenario, setScenario] = useState('base');
+  const [title, setTitle] = useState('');
+  const [locked, setLocked] = useState(false);
+  const [dlg, setDlg] = useState<null | 'new' | 'dup'>(null);
+  const [dlgBusy, setDlgBusy] = useState(false);
+  const [dlgErr, setDlgErr] = useState('');
+  const [flash, setFlash] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
   const [hist, setHist] = useState<Hist>({});
   const [canWrite, setCanWrite] = useState(false);
@@ -239,9 +254,11 @@ export default function BudgetPage() {
   const [conflict, setConflict] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [assistOpen, setAssistOpen] = useState(false);
-  const R = useRef<{ stamp: string | null; timer: any; dirty: boolean; saving: boolean; plan: Plan | null; undo: Plan[]; year: number }>({ stamp: null, timer: null, dirty: false, saving: false, plan: null, undo: [], year: DEFAULT_YEAR });
+  const R = useRef<{ stamp: string | null; timer: any; dirty: boolean; saving: boolean; plan: Plan | null; undo: Plan[]; year: number; scenario: string }>({ stamp: null, timer: null, dirty: false, saving: false, plan: null, undo: [], year: DEFAULT_YEAR, scenario: 'base' });
   const [undoN, setUndoN] = useState(0);
-  const ro = !canWrite;
+  const hasScenRef = useRef(true), titleRef = useRef('');
+  useEffect(() => { hasScenRef.current = hasScen; titleRef.current = title; }, [hasScen, title]);
+  const ro = !canWrite || locked;
 
   /* ---- préférences d'affichage (mémorisées dans le navigateur) ---- */
   useEffect(() => { const p = readPrefs(); if (typeof p.showQ === 'boolean') setShowQ(p.showQ); if (typeof p.showC === 'boolean') setShowC(p.showC); if (p.shownY) setShownY(p.shownY); }, []);
@@ -257,7 +274,7 @@ export default function BudgetPage() {
     return null;
   }, [supabase]);
 
-  const load = useCallback(async (y: number) => {
+  const load = useCallback(async (y: number, sc?: string) => {
     setStatus({ txt: 'Chargement…', off: false });
     try {
       const { data: auth } = await supabase.auth.getUser();
@@ -267,19 +284,28 @@ export default function BudgetPage() {
       const [w, adm] = await Promise.all([supabase.rpc('can_write_budget'), supabase.rpc('is_admin')]);
       setCanWrite(Boolean(w.data)); setIsAdmin(Boolean(adm.data));
       const herr = await loadHist();
-      const py = await supabase.from(T_PLAN).select('year').order('year');
-      const p = await supabase.from(T_PLAN).select('data,updated_at,validated_at,validated_data').eq('year', y).maybeSingle();
+      // liste des budgets (année + scénario) ; sans sql/06 la table n'a pas ces colonnes : mode « une année = un budget »
+      let py: any = await supabase.from(T_PLAN).select('year,scenario,title,is_locked,validated_at').order('year');
+      let hs = true;
+      if (py.error && /scenario|is_locked|title/i.test(py.error.message || '')) { hs = false; py = await supabase.from(T_PLAN).select('year,validated_at').order('year'); }
+      const list: ScenRow[] = ((py.data || []) as any[]).map((r) => ({ year: r.year, scenario: hs ? r.scenario : 'base', title: hs ? r.title || (r.scenario === 'base' ? 'Budget ' + r.year : r.scenario) : 'Budget ' + r.year, locked: hs ? !!r.is_locked : false, at: r.validated_at || null }));
+      const forYear = list.filter((r) => r.year === y);
+      const sel = sc || (forYear.some((r) => r.scenario === 'base') ? 'base' : forYear.length ? forYear[0].scenario : 'base');
+      let pq: any = supabase.from(T_PLAN).select(hs ? 'data,updated_at,validated_at,validated_data,title,is_locked' : 'data,updated_at,validated_at,validated_data').eq('year', y);
+      if (hs) pq = pq.eq('scenario', sel);
+      const p = await pq.maybeSingle();
       const err = herr || py.error || p.error;
       if (err) {
         const m = err.message || '';
         setNotice(/relation|does not exist|schema cache/i.test(m) ? 'Les tables du budget n’existent pas encore : exécutez sql/02_budget_pcmn.sql puis sql/04_admin_reel_validation.sql dans Supabase (SQL Editor), puis rechargez la page.' : /validated/i.test(m) ? 'Colonnes de validation absentes : exécutez sql/04_admin_reel_validation.sql dans Supabase, puis rechargez la page.' : 'Chargement impossible : ' + m);
       } else setNotice('');
-      setPlanYears(((py.data || []) as any[]).map((r) => r.year));
+      setFlash(''); setScens(list); setHasScen(hs); setScenario(sel); setTitle(p.data ? (hs ? p.data.title : '') || (sel === 'base' ? 'Budget ' + y : sel) : sel === 'base' ? 'Budget ' + y : sel); setLocked(Boolean(p.data && hs && p.data.is_locked));
+      setPlanYears([...new Set(list.map((r) => r.year))]);
       const raw = p.data && p.data.data && p.data.data.rows ? p.data.data : { v: 1, rows: {} };
       const rows: Record<string, Entry> = {};
       Object.keys(raw.rows).forEach((k) => { rows[k] = cloneEntry(raw.rows[k]); });
       const pl: Plan = { v: 1, rows };
-      R.current.plan = pl; R.current.year = y; R.current.stamp = p.data ? p.data.updated_at : null; R.current.dirty = false; R.current.undo = []; setUndoN(0); setConflict(false);
+      R.current.plan = pl; R.current.year = y; R.current.scenario = sel; R.current.stamp = p.data ? p.data.updated_at : null; R.current.dirty = false; R.current.undo = []; setUndoN(0); setConflict(false);
       setValid({ at: p.data ? p.data.validated_at || null : null, data: p.data && p.data.validated_data ? p.data.validated_data : null });
       setPlan(pl); setYear(y);
       setStatus({ txt: w.data ? (p.data ? 'Budget chargé' : 'Nouveau budget : enregistré à la première modification') : 'Lecture seule', off: !w.data });
@@ -299,8 +325,9 @@ export default function BudgetPage() {
     const snapshot = r.plan, y = r.year;
     try {
       let res: any;
-      if (r.stamp) res = await supabase.from(T_PLAN).update({ data: snapshot }).eq('year', y).eq('updated_at', r.stamp).select('updated_at');
-      else res = await supabase.from(T_PLAN).insert({ year: y, data: snapshot }).select('updated_at');
+      const sc = r.scenario;
+      if (r.stamp) { let q: any = supabase.from(T_PLAN).update({ data: snapshot }).eq('year', y); if (hasScenRef.current) q = q.eq('scenario', sc); res = await q.eq('updated_at', r.stamp).select('updated_at'); }
+      else res = await supabase.from(T_PLAN).insert(hasScenRef.current ? { year: y, scenario: sc, title: titleRef.current || sc, data: snapshot } : { year: y, data: snapshot }).select('updated_at');
       if (res.error) {
         if (res.error.code === '23505') { setConflict(true); setStatus({ txt: 'Conflit : budget modifié ailleurs', off: true }); }
         else throw res.error;
@@ -308,6 +335,7 @@ export default function BudgetPage() {
       else {
         r.stamp = res.data[0].updated_at; r.dirty = r.plan !== snapshot;
         setPlanYears((a) => (a.includes(y) ? a : [...a, y].sort()));
+        setScens((l) => (l.some((x) => x.year === y && x.scenario === sc) ? l : [...l, { year: y, scenario: sc, title: titleRef.current || sc, locked: false, at: null }]));
         setStatus({ txt: r.dirty ? 'Modifications à enregistrer…' : 'Enregistré à ' + new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' }), off: false });
         if (r.dirty) { clearTimeout(r.timer); r.timer = setTimeout(save, 600); }
       }
@@ -390,6 +418,44 @@ export default function BudgetPage() {
     if (!(await flush()) && !confirm('Des modifications ne sont pas enregistrées. Changer d’année quand même ?')) return;
     setReady(false); await load(y);
   };
+  const changeScenario = async (sc: string) => {
+    if (sc === scenario) return;
+    if (!(await flush()) && !confirm('Des modifications ne sont pas enregistrées. Changer de scénario quand même ?')) return;
+    setReady(false); await load(year, sc);
+  };
+  /** crée un scénario (vide ou copie du budget ouvert) puis l'ouvre */
+  const createScenario = async (y: number, t: string, copy: boolean) => {
+    setDlgErr('');
+    if (!(await flush())) { setDlgErr('Enregistrez d’abord les modifications en cours.'); return; }
+    const used = new Set(scens.filter((s) => s.year === y).map((s) => s.scenario));
+    let slug = slugify(t), n = 2; const base = slug;
+    while (used.has(slug)) slug = (base.slice(0, 36) + '-' + n++);
+    setDlgBusy(true);
+    const rows: Record<string, Entry> = {};
+    if (copy && R.current.plan) Object.keys(R.current.plan.rows).forEach((k) => { rows[k] = cloneEntry(R.current.plan!.rows[k]); });
+    const res = await supabase.from(T_PLAN).insert({ year: y, scenario: slug, title: t, data: { v: 1, rows } }).select('updated_at');
+    setDlgBusy(false);
+    if (res.error) { setDlgErr(/scenario|title/i.test(res.error.message) && !/duplicate/i.test(res.error.message) ? 'Exécutez d’abord sql/06_budget_scenarios.sql dans Supabase.' : res.error.code === '23505' ? 'Ce scénario existe déjà pour cette année.' : 'Création impossible : ' + res.error.message); return; }
+    setDlg(null); setReady(false); await load(y, slug);
+    setStatus({ txt: copy ? 'Budget dupliqué : ' + t : 'Scénario créé : ' + t, off: false });
+  };
+  const deleteScenario = async () => {
+    if (!isAdmin || locked) return;
+    if (!confirm(`Supprimer définitivement le scénario « ${title} » (${year}) ?`)) return;
+    let q: any = supabase.from(T_PLAN).delete().eq('year', year); if (hasScen) q = q.eq('scenario', scenario);
+    const r = await q;
+    if (r.error) { setNotice('Suppression impossible : ' + r.error.message); return; }
+    R.current.dirty = false; setReady(false); await load(year);
+  };
+  /** 2026 : 10 mois réels du grand livre + 2 mois extrapolés (CA 380.560 €) */
+  const resetReal2026 = () => {
+    const r = R.current; if (!r.plan || ro) return;
+    if (!confirm('Remplacer tout le budget ouvert par les chiffres réels 2026 (10 mois du grand livre + 2 mois extrapolés, CA 380 560 €) ? Vous pourrez annuler avec « ↶ Annuler ».')) return;
+    const a = buildAtterrissage2026();
+    commit({ ...r.plan, rows: a.rows }, r.plan);
+    setNotice('');
+    setFlash(`Budget 2026 réinitialisé : ${a.caReel.toLocaleString('fr-BE', { minimumFractionDigits: 2 })} € de CA réel sur 10 mois + extrapolation de novembre et décembre = ${a.ca.toLocaleString('fr-BE')} € HTVA. « ↶ Annuler » rétablit l’état précédent.`);
+  };
 
   /* ---- export : toutes les années de référence, les mois, les trimestres selon l'interrupteur, les commentaires ---- */
   type Line = { kind: 'sec' | 'grp' | 'acc' | 'sub' | 'res'; code: string; label: string; h: (number | undefined)[]; m: number[]; comment?: string };
@@ -418,7 +484,7 @@ export default function BudgetPage() {
       const ref = refYear == null ? undefined : l.h[years.indexOf(refYear)];
       out.push([l.code, (l.kind === 'acc' ? '   ' : l.kind === 'sub' ? '      ' : '') + l.label, ...l.h.map((x) => (x === undefined ? '' : x)), ...cols.map((c) => colVal(l.m, c)), sum(l.m), ref !== undefined && Math.abs(ref) >= 0.5 ? r2(((sum(l.m) - ref) / Math.abs(ref)) * 100) : '', l.comment || '']);
     });
-    download('﻿' + out.map((r) => r.map(q).join(';')).join('\r\n'), `budget-${year}.csv`, 'text/csv;charset=utf-8');
+    download('﻿' + out.map((r) => r.map(q).join(';')).join('\r\n'), `budget-${year}${scenario !== 'base' ? '-' + scenario : ''}.csv`, 'text/csv;charset=utf-8');
   };
   const exportXlsx = () => {
     const lines = buildLines();
@@ -449,16 +515,17 @@ export default function BudgetPage() {
       { name: 'Commentaires', rows: comments, widths: [10, 50, 90] },
       { name: 'Informations', rows: info, widths: [20, 90] },
     ]);
-    download(bytes as any, `budget-${year}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    download(bytes as any, `budget-${year}${scenario !== 'base' ? '-' + scenario : ''}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   };
 
   /* ---- validation du budget (administrateur) ---- */
   const validate = async (on: boolean) => {
     if (!(await flush())) { setNotice('Enregistrez d’abord les modifications en cours (conflit ou erreur d’enregistrement).'); return; }
-    if (!confirm(on ? `Valider le budget ${year} ? Une copie figée servira de référence à l’analyse du réalisé.` : `Retirer la validation du budget ${year} ?`)) return;
-    const r = await supabase.rpc('validate_pcmn_budget', { p_year: year, p_validate: on });
+    if (!confirm(on ? `Valider et verrouiller le budget ${year} « ${title} » ? La saisie sera désactivée et une copie figée servira de référence à l’analyse du réalisé.` : `Retirer la validation et déverrouiller le budget ${year} « ${title} » ?`)) return;
+    const r = await supabase.rpc('validate_pcmn_budget', hasScen ? { p_year: year, p_validate: on, p_scenario: scenario } : { p_year: year, p_validate: on });
     if (r.error) { setNotice('Validation impossible : ' + r.error.message); return; }
     setValid({ at: on ? (r.data as string) || new Date().toISOString() : null, data: on ? R.current.plan : null });
+    if (hasScen) { setLocked(on); setScens((l) => l.map((x) => (x.year === year && x.scenario === scenario ? { ...x, locked: on, at: on ? new Date().toISOString() : null } : x))); }
     setStatus({ txt: on ? 'Budget validé' : 'Validation retirée', off: false });
   };
 
@@ -504,23 +571,23 @@ export default function BudgetPage() {
     );
   };
   const kpis: [string, string, string][] = [['ca', "Chiffre d'affaires", 'Classe 70'], ['mb', 'Marge brute', RES_HINT.mb], ['ebitda', 'EBITDA', RES_HINT.ebitda], ['re', "Résultat d'exploitation", RES_HINT.re], ['net', 'Résultat net', RES_HINT.net]];
-  const yearOptions = useMemo(() => [...new Set([...planYears, ...years.map((y) => y + 1), year, DEFAULT_YEAR, DEFAULT_YEAR + 1])].filter((y) => y >= 2000 && y <= 2100).sort((a, b) => a - b), [planYears, years, year]);
+  const yearOptions = useMemo(() => [...new Set([...planYears, ...years.map((y) => y + 1), year, year + 1, DEFAULT_YEAR, DEFAULT_YEAR + 1, DEFAULT_YEAR + 2])].filter((y) => y >= 2000 && y <= 2100).sort((a, b) => a - b), [planYears, years, year]);
 
   const right = (
     <>
       <span className={'site-state' + (status.off ? ' off' : '')} role="status"><span className="dot" /><span>{status.txt}</span></span>
-      <span className={'site-role' + (valid.at ? '' : ' ro')} title={valid.at ? 'Budget validé le ' + new Date(valid.at).toLocaleDateString('fr-BE') : 'Budget non validé (brouillon)'}>{valid.at ? 'Validé' : 'Brouillon'} {year}</span>
+      <span className={'site-role' + (valid.at || locked ? '' : ' ro')} title={valid.at ? 'Budget validé le ' + new Date(valid.at).toLocaleDateString('fr-BE') : 'Budget non validé (brouillon)'}>{locked || valid.at ? 'Validé & Verrouillé' : 'Brouillon'} · {year}{hasScen && scenario !== 'base' ? ' · ' + title : ''}</span>
     </>
   );
 
   return (
     <>
       <AppHeader title="Budget prévisionnel" right={right} />
-      <style dangerouslySetInnerHTML={{ __html: BD_CSS + LI_CSS + AS_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: BD_CSS + LI_CSS + AS_CSS + SC_CSS + BD_CSS2 }} />
       <div className="bd-root">
         <main className="bd-wrap">
           {notice ? <div className="bd-alert" role="alert">{notice}</div> : null}
-          {conflict ? <div className="bd-alert" role="alert">Ce budget a été modifié par quelqu’un d’autre depuis votre ouverture. <button type="button" className="bd-btn sm" onClick={() => load(year)}>Recharger la version enregistrée</button> (vos modifications non enregistrées seront perdues).</div> : null}
+          {conflict ? <div className="bd-alert" role="alert">Ce budget a été modifié par quelqu’un d’autre depuis votre ouverture. <button type="button" className="bd-btn sm" onClick={() => load(year, scenario)}>Recharger la version enregistrée</button> (vos modifications non enregistrées seront perdues).</div> : null}
           {!ready ? <p className="bd-loading">Chargement du budget…</p> : (
             <>
               <section className="bd-kpis" aria-label="Indicateurs du budget">
@@ -535,6 +602,13 @@ export default function BudgetPage() {
               <section className="bd-bar" aria-label="Affichage">
                 <label className="bd-lbl" htmlFor="bd-year">Année du budget</label>
                 <select id="bd-year" value={year} onChange={(e) => changeYear(+e.target.value)}>{yearOptions.map((y) => <option key={y} value={y}>{y}{planYears.includes(y) ? '' : ' (nouveau)'}</option>)}</select>
+                {hasScen ? (<>
+                  <label className="bd-lbl" htmlFor="bd-scen">Scénario</label>
+                  <select id="bd-scen" value={scenario} onChange={(e) => changeScenario(e.target.value)}>
+                    {(scens.some((x) => x.year === year && x.scenario === scenario) ? [] : [{ year, scenario, title, locked: false, at: null } as ScenRow]).concat(scens.filter((x) => x.year === year)).map((x) => <option key={x.scenario} value={x.scenario}>{x.title}{x.locked ? ' 🔒' : ''}</option>)}
+                  </select>
+                  <span className={'bd-state ' + (locked ? 'lk' : 'dr')} role="status">{locked ? '🔒 Validé & Verrouillé' : 'Brouillon'}</span>
+                </>) : null}
                 <span className="bd-sep" />
                 <span className="bd-lbl" id="bd-yrs">Années de référence</span>
                 <span className="bd-chips" role="group" aria-labelledby="bd-yrs">
@@ -566,14 +640,22 @@ export default function BudgetPage() {
                 <button type="button" className="bd-btn" disabled={ro || !undoN} onClick={undo} title="Annule la dernière variation ou reprise d’année">↶ Annuler</button>
                 <span className="bd-sep" />
                 <button type="button" className="bd-btn" aria-expanded={importOpen} onClick={() => setImportOpen((v) => !v)}>⭳ Importer une année</button>
+                {hasScen ? <button type="button" className="bd-btn" disabled={!canWrite} onClick={() => { setDlgErr(''); setDlg('new'); }}>➕ Nouveau scénario</button> : null}
+                {hasScen ? <button type="button" className="bd-btn" disabled={!canWrite || !plan} onClick={() => { setDlgErr(''); setDlg('dup'); }}>📋 Dupliquer le budget</button> : null}
+                {year === 2026 ? <button type="button" className="bd-btn" disabled={ro} title="Réinjecte les 10 mois réels du grand livre et 2 mois extrapolés (CA 380 560 € HTVA)" onClick={resetReal2026}>🔄 Réinitialiser 2026 aux chiffres réels</button> : null}
                 <button type="button" className="bd-btn" aria-expanded={assistOpen} onClick={() => setAssistOpen((v) => !v)}>⚙ Assistants (RH, CA, achats)</button>
                 <button type="button" className="bd-btn" onClick={exportXlsx}>Exporter en Excel</button>
                 <button type="button" className="bd-btn" onClick={exportCsv}>Exporter en CSV</button>
+                <Link className="bd-btn" href="/apps/budget/analyse">📈 Projection 3 ans</Link>
+                {isAdmin && hasScen && !locked && planYears.includes(year) && scens.length > 1 ? <button type="button" className="bd-btn danger" onClick={deleteScenario}>Supprimer ce scénario</button> : null}
                 {isAdmin ? (valid.at
                   ? <button type="button" className="bd-btn" onClick={() => validate(false)}>Retirer la validation</button>
                   : <button type="button" className="bd-btn primary" disabled={!plan || !planYears.includes(year) && !R.current.stamp} onClick={() => validate(true)}>✓ Valider ce budget</button>) : null}
               </section>
-              {valid.at ? <p className="bd-hint">Budget validé le {new Date(valid.at).toLocaleDateString('fr-BE')} : une copie figée sert de référence à l’analyse du réalisé. Vos modifications ultérieures ne changent que le brouillon ; revalidez pour mettre à jour la référence.</p> : null}
+              {valid.at ? <p className="bd-hint">Budget « {title} » validé le {new Date(valid.at).toLocaleDateString('fr-BE')} : une copie figée sert de référence à l’analyse du réalisé. {locked ? 'Il est verrouillé : la saisie est désactivée (un administrateur peut retirer la validation pour le modifier).' : 'Vos modifications ultérieures ne changent que le brouillon ; revalidez pour mettre à jour la référence.'}</p> : null}
+              {!hasScen ? <p className="bd-hint">Scénarios indisponibles : exécutez <code>sql/06_budget_scenarios.sql</code> dans Supabase puis rechargez la page.</p> : null}
+              {flash ? <div className="li-msg ok" role="status">{flash}</div> : null}
+              {dlg ? <ScenarioDialog mode={dlg} years={yearOptions} defaultYear={dlg === 'dup' ? Math.min(2100, year + 1) : year} defaultTitle={dlg === 'dup' ? title + ' (copie)' : ''} from={`${year} · ${title}`} busy={dlgBusy} error={dlgErr} onClose={() => setDlg(null)} onSubmit={(y, t) => createScenario(y, t, dlg === 'dup')} /> : null}
 
               {assistOpen && plan ? <Assistants rows={plan.rows} year={year} ro={ro} onClose={() => setAssistOpen(false)} onApply={(rows) => { const r = R.current; if (r.plan) commit({ ...r.plan, rows }, r.plan); }} /> : null}
 
@@ -599,7 +681,7 @@ export default function BudgetPage() {
                   </div>
                 </section>
               ) : null}
-              {ro ? <p className="bd-hint">Lecture seule : votre rôle ne permet pas de modifier le budget.</p> : <p className="bd-hint">Saisissez directement dans les cellules (mois par mois) ou cliquez sur « An » pour entrer un montant annuel réparti sur 12 mois. Ouvrez un compte (▸) pour la variation en % et les lignes de détail. Montants en € HTVA.</p>}
+              {ro ? <p className="bd-hint">{locked ? 'Budget verrouillé (validé) : la saisie est désactivée.' : 'Lecture seule : votre rôle ne permet pas de modifier le budget.'}</p> : <p className="bd-hint">Saisissez directement dans les cellules (mois par mois) ou cliquez sur « An » pour entrer un montant annuel réparti sur 12 mois. Ouvrez un compte (▸) pour la variation en % et les lignes de détail. Montants en € HTVA.</p>}
 
               <div className="bd-scroll">
                 <table className="bd-tbl">
@@ -669,6 +751,11 @@ export default function BudgetPage() {
   );
 }
 
+const BD_CSS2 = `.bd-state{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.bd-state.dr{background:var(--accent-soft);color:var(--accent-text)}
+.bd-state.lk{background:var(--brand);color:var(--brand-2)}
+a.bd-btn{display:inline-flex;align-items:center;text-decoration:none}
+`;
 const BD_CSS = `.bd-root{background:var(--bg);color:var(--ink);font-family:var(--font-body,'IBM Plex Sans',sans-serif);min-height:calc(100vh - 90px)}
 .bd-wrap{max-width:1680px;margin:0 auto;padding:16px}
 .bd-loading{padding:60px 16px;text-align:center;color:var(--muted)}
