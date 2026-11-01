@@ -142,9 +142,9 @@ export default function ProjectionPage() {
                   <summary>Définitions des indicateurs</summary>
                   <ul>
                     <li><b>Marge brute</b> = chiffre d’affaires (classe 70) − achats de marchandises et matières (classe 60). <b>Taux</b> = marge brute / CA.</li>
-                    <li><b>Personnel</b> = classe 62 (salariés) + rémunération du dirigeant (618000) + droits d’auteur (613400).</li>
-                    <li><b>Frais généraux</b> = classe 61 hors rémunération du dirigeant et droits d’auteur.</li>
-                    <li><b>Charges fixes</b> = personnel + frais généraux + personnel externe + énergie + amortissements et provisions + autres charges d’exploitation + charges financières − autres produits (74, 71;74, 75, vinaigrerie net).</li>
+                    <li><b>Personnel</b> = classe 62 (salariés) + consultance management du dirigeant (618000) + droits d’auteur (613400), ces deux comptes étant rangés dans « Personnel externe ».</li>
+                    <li><b>Frais généraux</b> = classe 61 (la direction et les droits d’auteur n’en font plus partie).</li>
+                    <li><b>Charges fixes</b> = personnel + frais généraux + consultances externes hors direction + énergie + amortissements et provisions + autres charges d’exploitation + charges financières − autres produits (74, 71;74, 75, vinaigrerie net).</li>
                     <li><b>Seuil de rentabilité</b> = charges fixes / taux de marge brute : le CA à partir duquel la marge brute couvre toutes les charges fixes.</li>
                     <li><b>Résultat d’exploitation (anneau)</b> = marge brute − personnel − frais généraux ; s’il est négatif, le déficit est signalé à part.</li>
                   </ul>
@@ -188,6 +188,11 @@ function KpiCard({ plan, k }: { plan: PlanRow; k: Kpis }) {
       <Ratio label={'Poids du personnel · ' + eur0(k.rh)} a={pct1(k.rhPctCa)} b={pct1(k.rhPctMb)} aLab="du CA" bLab="de la marge brute" warn={k.rhPctMb > 0.6} />
       <Ratio label={'Poids des frais généraux · ' + eur0(k.fg)} a={pct1(k.fgPctCa)} b={pct1(k.fgPctMb)} aLab="du CA" bLab="de la marge brute" warn={k.fgPctMb > 0.4} />
       <Ratio label={'Seuil de rentabilité'} a={eur0(k.breakeven)} b={(gap >= 0 ? '+' : '−') + eur0(Math.abs(gap))} aLab={'charges fixes ' + eur0(k.fixed)} bLab={gap >= 0 ? 'CA au-dessus du seuil' : 'CA sous le seuil'} warn={gap < 0} />
+      <details className="pj-fx">
+        <summary>Détail des charges fixes · {eur0(k.fixed)}</summary>
+        <ul>{k.fixedParts.map((x: { label: string; v: number }) => <li key={x.label}><span>{x.label}</span><b>{eur0(x.v)}</b></li>)}</ul>
+        <p>Seuil = {eur0(k.fixed)} / {pct1(k.mbPct)} de taux de marge brute.</p>
+      </details>
     </article>
   );
 }
@@ -246,6 +251,12 @@ const PJ_CSS = `
 .pj-rv span{display:flex;flex-direction:column}
 .pj-rv b{font-size:20px;color:#012735;font-variant-numeric:tabular-nums}
 .pj-rv small{font-size:11px;color:var(--muted)}
+.pj-fx{padding:8px 14px 12px;font-size:12px;border-top:1px solid var(--line)}
+.pj-fx summary{cursor:pointer;font-weight:600;color:#012735}
+.pj-fx ul{list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.pj-fx li{display:flex;justify-content:space-between;gap:10px}
+.pj-fx li b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.pj-fx p{margin:4px 0 0;color:var(--muted)}
 .pj-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
 .pj-card{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
 .pj-card figcaption{font-weight:700;margin-bottom:8px;color:#012735}
