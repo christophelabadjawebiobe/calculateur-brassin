@@ -23,18 +23,18 @@ export type Employee = {
 export const EMPLOYEES: Employee[] = [
   { id: 'botty', name: 'Arthur BOTTY', role: 'Ventes & Conditionnement', regime: '38h/38h (temps plein)', start: '2024-06-11', end: null, brut: 2855.01, atn: 0, onss: 359.4, transport: 66.72, titres: 21, crPart: 6.91, telework: 0, repres: 0, extras: true },
   { id: 'verleyen', name: 'Sébastien VERLEYEN', role: 'Responsable Production', regime: '38h/38h (temps plein)', start: '2021-01-04', end: null, brut: 3148.32, atn: 0, onss: 696.69, transport: 75.78, titres: 21, crPart: 6.91, telework: 0, repres: 0, extras: true },
-  { id: 'mention', name: 'Noah MENTION', role: 'Assistant Sales Management / Master', regime: '22h/38h (apprenti)', start: '2026-09-14', end: '2027-09-12', brut: 1301.28, atn: 0, onss: 119.42, transport: 0, titres: 0, crPart: 6.91, telework: 0, repres: 0, extras: true },
+  { id: 'mention', name: 'Noah MENTION', role: 'Assistant Sales Management / Master', regime: '22h/38h (apprenti)', start: '2026-09-14', end: '2028-09-12', brut: 1301.28, atn: 0, onss: 119.42, transport: 0, titres: 0, crPart: 6.91, telework: 0, repres: 0, extras: true },
   { id: 'urgyan', name: 'Vanessa URGYAN', role: 'Déléguée commerciale', regime: '30h/38h (temps partiel)', start: '2026-10-01', end: null, brut: 2205.36, atn: 3, onss: 356.47, transport: 0, titres: 18, crPart: 6.91, telework: 130, repres: 90, extras: true },
   // Direction : référentiel 2027 (date d'entrée à confirmer). « Déplacements » = frais, ATN et assurances (287,13 €).
-  { id: 'herman', name: 'Stanislas HERMAN', role: 'Directeur', regime: '38h/38h (temps plein)', start: '2027-01-01', end: null, brut: 3151.42, atn: 0, onss: 861.29, transport: 287.13, titres: 20, crPart: 6.91, telework: 0, repres: 0, extras: true },
+  { id: 'herman', name: 'Stanislas HERMAN', role: 'Directeur (en poste depuis 10 ans, jusqu’au 31/12/2026)', regime: '38h/38h (temps plein)', start: '2016-01-01', end: '2026-12-31', brut: 3151.42, atn: 0, onss: 861.29, transport: 287.13, titres: 20, crPart: 6.91, telework: 0, repres: 0, extras: true },
 ];
 /** Les 4 contrats du journal de paie n°20 (le directeur n'y figure pas) */
 export const JOURNAL_IDS = ['botty', 'verleyen', 'mention', 'urgyan'];
-/** Référentiel 2027 : rémunération du dirigeant (compte 618) et droits d'auteur (compte 61) */
+/** Référentiel 2027 : consultance management du dirigeant (compte 618000) et droits d'auteur (613400), rangés dans « Personnel externe » */
 export const GERANCE_MENSUEL = 6000;
 export const DROITS_ANNUEL = 50000;
-/** Total annuel de référence RH + direction annoncé pour 2027 (≈ 348.000 €) */
-export const TOTAL_RH_2027_REF = 348000;
+/** Total annuel de référence RH + direction annoncé pour 2027 (287.034 €) */
+export const TOTAL_RH_2027_REF = 287034;
 export { GERANCE_KEY, DROITS_KEY };
 /** Totaux de référence du journal de paie n°20 (4 contrats, mois complet) */
 export const PAIE_REF = { brut: 9509.97, onss: 1531.98, cr: 414.6 };
@@ -59,7 +59,7 @@ export const RH_ACCOUNTS: [string, string][] = [
   ['620201', 'Rémunérations employés'], ['620221', 'ATN GSM'], ['740221', 'Récupération ATN GSM'],
   ['625020', 'Provision pécule de vacances et prime (dotation)'], ['620204', 'Double pécule'], ['620205', 'Prime de fin d’année'], ['625120', 'Utilisation / reprise de provision'],
   ['621020', 'ONSS patronal'], ['623100', 'Frais de déplacement'], ['623210', 'Chèques-repas (part patronale)'], ['623280', 'Forfait télétravail'], ['623270', 'Frais de représentation'],
-  ['618000', 'Rémunération du dirigeant (gérance)'], ['613400', 'Droits d’auteur'],
+  ['618000', 'Consultance management (dirigeant)'], ['613400', 'Droits d’auteur (consultance externe)'],
 ];
 
 const dim = (y: number, m: number) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
@@ -121,7 +121,7 @@ export function applyRh(rows: Record<string, Entry>, list: Employee[], year: num
       const months = m[key].map((v, i) => (i >= p.from - 1 ? v : 0));
       if (months.some((v) => Math.abs(v) >= 0.005)) subs.push({ id: uid(), label: e.name, mode: 'monthly', annual: 0, months });
     }
-    if (key === GERANCE_KEY && p.gerance) subs.push({ id: uid(), label: 'Dirigeant (gérance)', mode: 'monthly', annual: 0, months: Z12().map((_, i) => (i >= p.from - 1 ? r2(p.gerance) : 0)) });
+    if (key === GERANCE_KEY && p.gerance) subs.push({ id: uid(), label: 'Consultance management (dirigeant)', mode: 'monthly', annual: 0, months: Z12().map((_, i) => (i >= p.from - 1 ? r2(p.gerance) : 0)) });
     if (key === DROITS_KEY && p.droits) {
       const n = 13 - p.from; const arr = splitAmount(p.droits * n / 12, Array(n).fill(1));
       subs.push({ id: uid(), label: 'Droits d’auteur (lissés)', mode: 'monthly', annual: 0, months: [...Array(p.from - 1).fill(0), ...arr] });
@@ -253,7 +253,8 @@ export function applyFixed(rows: Record<string, Entry>, lines: FixedLine[], from
 export const ATTERRISSAGE_2026 = { caReel10: 302781.46, caTotal: 380560 };
 
 /** Plan 2026 complet : janv.–oct. = réalisé comptable ; nov.–déc. = extrapolation (CA total 380.560 €, achats au ratio réel, RH de la paie, charges fixes récurrentes, moyenne pour le reste) */
-export function buildAtterrissage2026(list: Employee[] = EMPLOYEES): { rows: Record<string, Entry>; ca: number; caReel: number } {
+/** Nov.–déc. 2026 : salariés du journal de paie d'octobre ; le directeur (absent du journal par erreur) est réintégré sur tout le 4e trimestre : octobre (ajouté au réalisé), novembre, décembre + prime de fin d'année */
+export function buildAtterrissage2026(list: Employee[] = EMPLOYEES.filter((e: Employee) => JOURNAL_IDS.includes(e.id))): { rows: Record<string, Entry>; ca: number; caReel: number } {
   const monthsOf = (k: string): number[] => (ACTUAL_2026[k] || Array(10).fill(0)).concat([0, 0]);
   const rows: Record<string, Entry> = {};
   const secOf: Record<string, string> = {};
@@ -267,6 +268,9 @@ export function buildAtterrissage2026(list: Employee[] = EMPLOYEES): { rows: Rec
   const rh: Record<string, number[]> = {}; RH_ACCOUNTS.forEach(([k]) => { rh[k] = Z12(); });
   const params: RhParams = { ...RH_DEFAULTS, from: 11, gerance: 0, droits: 0 };
   list.forEach((e) => { const m = employeeMonths(e, 2026, params); RH_ACCOUNTS.forEach(([k]) => { m[k].forEach((v, i) => { rh[k][i] += v; }); }); });
+  const oct: Record<string, number> = {}; // octobre du directeur, à ajouter au réalisé comptable
+  const dirEmp = EMPLOYEES.find((e) => e.id === 'herman');
+  if (dirEmp) { const hm = employeeMonths(dirEmp, 2026, params); RH_ACCOUNTS.forEach(([k]) => { rh[k][10] += hm[k][10]; rh[k][11] += hm[k][11]; oct[k] = hm[k][9]; }); }
   const fixed: Record<string, number> = {}; FIXED_61.forEach((f) => { if (f.rec) fixed[f.code] = f.monthly; });
   const caM = Z12(); // CA mensuel du plan (réel puis extrapolé)
   s70.forEach((k) => monthsOf(k).forEach((v, i) => { caM[i] += v; }));
@@ -284,6 +288,7 @@ export function buildAtterrissage2026(list: Employee[] = EMPLOYEES): { rows: Rec
     else if (fixed[k] !== undefined) { n = fixed[k]; d = fixed[k]; }
     else if (isStockAccount(k) || active < 5) { n = 0; d = 0; }
     else { n = avg; d = avg; }
+    if (oct[k]) act[9] = r2(act[9] + oct[k]);
     const months = act.concat([r2(n), r2(d)]);
     rows[k] = { mode: 'monthly', annual: 0, months, subs: [] };
   });
