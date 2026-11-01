@@ -10,6 +10,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
 import LedgerImport, { LI_CSS } from '@/components/LedgerImport';
+import Assistants, { AS_CSS } from './Assistants';
 import { createClient } from '@/lib/supabase/client';
 import {
   CHART, MONTHS, RES_AFTER, RES_HINT, RES_LABEL, Z12, accMonths, addTo, applyPct, cloneEntry, colVal, colsFor, emptyEntry, eur0, fmt0, leafMonths, parseNum, pctTxt, quarter, r2,
@@ -237,6 +238,7 @@ export default function BudgetPage() {
   const [gPct, setGPct] = useState(''), [gBasis, setGBasis] = useState<'current' | 'hist' | 'chain'>('current'), [gScope, setGScope] = useState('all');
   const [conflict, setConflict] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [assistOpen, setAssistOpen] = useState(false);
   const R = useRef<{ stamp: string | null; timer: any; dirty: boolean; saving: boolean; plan: Plan | null; undo: Plan[]; year: number }>({ stamp: null, timer: null, dirty: false, saving: false, plan: null, undo: [], year: DEFAULT_YEAR });
   const [undoN, setUndoN] = useState(0);
   const ro = !canWrite;
@@ -514,7 +516,7 @@ export default function BudgetPage() {
   return (
     <>
       <AppHeader title="Budget prévisionnel" right={right} />
-      <style dangerouslySetInnerHTML={{ __html: BD_CSS + LI_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: BD_CSS + LI_CSS + AS_CSS }} />
       <div className="bd-root">
         <main className="bd-wrap">
           {notice ? <div className="bd-alert" role="alert">{notice}</div> : null}
@@ -564,6 +566,7 @@ export default function BudgetPage() {
                 <button type="button" className="bd-btn" disabled={ro || !undoN} onClick={undo} title="Annule la dernière variation ou reprise d’année">↶ Annuler</button>
                 <span className="bd-sep" />
                 <button type="button" className="bd-btn" aria-expanded={importOpen} onClick={() => setImportOpen((v) => !v)}>⭳ Importer une année</button>
+                <button type="button" className="bd-btn" aria-expanded={assistOpen} onClick={() => setAssistOpen((v) => !v)}>⚙ Assistants (RH, CA, achats)</button>
                 <button type="button" className="bd-btn" onClick={exportXlsx}>Exporter en Excel</button>
                 <button type="button" className="bd-btn" onClick={exportCsv}>Exporter en CSV</button>
                 {isAdmin ? (valid.at
@@ -571,6 +574,8 @@ export default function BudgetPage() {
                   : <button type="button" className="bd-btn primary" disabled={!plan || !planYears.includes(year) && !R.current.stamp} onClick={() => validate(true)}>✓ Valider ce budget</button>) : null}
               </section>
               {valid.at ? <p className="bd-hint">Budget validé le {new Date(valid.at).toLocaleDateString('fr-BE')} : une copie figée sert de référence à l’analyse du réalisé. Vos modifications ultérieures ne changent que le brouillon ; revalidez pour mettre à jour la référence.</p> : null}
+
+              {assistOpen && plan ? <Assistants rows={plan.rows} year={year} ro={ro} onClose={() => setAssistOpen(false)} onApply={(rows) => { const r = R.current; if (r.plan) commit({ ...r.plan, rows }, r.plan); }} /> : null}
 
               {importOpen ? (
                 <section className="bd-modal" aria-label="Importer une année">
