@@ -5,7 +5,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CHART, MONTHS, accMonths, parseNum, r2, secAccKeys, sum, type Entry } from '@/lib/pcmn';
 import {
-  CA_DEFAULTS, CA_MONTHLY, EMPLOYEES, FIXED_61, PAIE_REF, RATIOS_60, RATIO_60_DEFAULT, RATIO_60_RANGE, RH_ACCOUNTS, RH_DEFAULTS, SECTORS, SEASON_LABEL,
+  CA_DEFAULTS, CA_MONTHLY, EMPLOYEES, TOTAL_RH_2027_REF, FIXED_61, PAIE_REF, RATIOS_60, RATIO_60_DEFAULT, RATIO_60_RANGE, RH_ACCOUNTS, RH_DEFAULTS, SECTORS, SEASON_LABEL,
   applyAchats, applyCa, applyFixed, applyRh, caAnnual, caMonthsOf, coefAnnuel, fixedDefaults, monthlyReference, splitAmount,
   type CaTarget, type Employee, type FixedLine, type RhParams, type Season,
 } from '@/lib/defaults';
@@ -39,7 +39,7 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
   const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
   const [from, setFrom] = useState<number>(year === 2026 ? 11 : 1);
   const [emps, setEmps] = useState<Employee[]>(() => EMPLOYEES.map((e: Employee) => ({ ...e })));
-  const [rh, setRh] = useState<RhParams>({ ...RH_DEFAULTS });
+  const [rh, setRh] = useState<RhParams>(() => ({ ...RH_DEFAULTS, ...(year < 2027 ? { gerance: 0, droits: 0 } : {}) })); // gérance et droits d'auteur : référentiel 2027
   const [ca, setCa] = useState<CaTarget>({ ...CA_DEFAULTS });
   const [pcts, setPcts] = useState<number[]>(() => SECTORS.map((s) => s.pct));
   const [locks, setLocks] = useState<(number | null)[]>(() => SECTORS.map(() => null));
@@ -53,8 +53,8 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
     try {
       const s = JSON.parse(localStorage.getItem(STORE) || 'null');
       if (s && typeof s === 'object') {
-        if (Array.isArray(s.emps) && s.emps.length) setEmps(s.emps);
-        if (s.rh) setRh({ ...RH_DEFAULTS, ...s.rh });
+        if (Array.isArray(s.emps) && s.emps.length) setEmps([...(s.emps as Employee[]), ...EMPLOYEES.filter((d: Employee) => !(s.emps as Employee[]).some((x: Employee) => x.id === d.id)).map((d: Employee) => ({ ...d }))]);
+        if (s.rh) setRh((cur: RhParams) => ({ ...RH_DEFAULTS, ...s.rh, gerance: cur.gerance, droits: cur.droits }));
         if (typeof s.ratio === 'number') setRatio(s.ratio);
         if (Array.isArray(s.fixed) && s.fixed.length) setFixed(fixedDefaults().map((d: FixedLine) => (s.fixed as FixedLine[]).find((x: FixedLine) => x.code === d.code) || d));
       }
@@ -63,7 +63,7 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
   }, []);
   useEffect(() => {
     if (!loaded.current) return;
-    try { localStorage.setItem(STORE, JSON.stringify({ emps, rh, ratio, fixed })); } catch { /* ignoré */ }
+    try { const { gerance: _g, droits: _d, ...rhSaved } = rh; localStorage.setItem(STORE, JSON.stringify({ emps, rh: rhSaved, ratio, fixed })); } catch { /* ignoré */ }
   }, [emps, rh, ratio, fixed]);
 
   const ok = (t: string) => setMsg({ ok: true, t });
@@ -138,10 +138,10 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
 
       {tab === 'rh' ? (
         <div role="tabpanel" className="as-panel">
-          <p className="bd-hint">Base : journal de paie UCM n°20 (octobre 2026). Les montants sont répartis en lignes de détail par collaborateur dans les comptes 620201, 621020, 6232xx…</p>
+          <p className="bd-hint">Base : journal de paie UCM n°20 (octobre 2026). Les montants sont répartis en lignes de détail par collaborateur dans les comptes 620201, 621020, 6232xx…, plus la rémunération du dirigeant (618000) et les droits d’auteur (613400). Stanislas HERMAN (directeur) est prévu à partir de 2027 : ajustez sa date d’entrée si besoin.</p>
           <div className="as-scroll">
             <table className="as-tbl">
-              <thead><tr><th>Collaborateur</th><th>Entrée</th><th>Sortie</th><th className="n">Brut mensuel</th><th className="n">dont ATN</th><th className="n">ONSS patronal net</th><th className="n">Déplacements</th><th className="n">Chèques-repas</th><th className="n">Télétravail</th><th className="n">Représentation</th><th>Pécule / PFA</th></tr></thead>
+              <thead><tr><th>Collaborateur</th><th>Entrée</th><th>Sortie</th><th className="n">Brut mensuel</th><th className="n">dont ATN</th><th className="n">ONSS patronal net</th><th className="n">Déplacements / frais</th><th className="n">Chèques-repas</th><th className="n">Télétravail</th><th className="n">Représentation</th><th>Pécule / PFA</th></tr></thead>
               <tbody>
                 {emps.map((e: Employee) => (
                   <tr key={e.id}>
@@ -159,7 +159,7 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
                   </tr>
                 ))}
               </tbody>
-              <tfoot><tr><td colSpan={3}><b>Total mensuel (contrats complets)</b></td><td className="n">{eur2(ref.brut)}</td><td /><td className="n">{eur2(ref.onss)}</td><td /><td className="n">{eur2(ref.cr)}</td><td colSpan={3} /></tr></tfoot>
+              <tfoot><tr><td colSpan={3}><b>Total mensuel du journal de paie (4 contrats)</b></td><td className="n">{eur2(ref.brut)}</td><td /><td className="n">{eur2(ref.onss)}</td><td /><td className="n">{eur2(ref.cr)}</td><td colSpan={3} /></tr></tfoot>
             </table>
           </div>
           <p className={refOk ? 'as-ok' : 'bd-hint'}>{refOk ? `✓ Conforme au journal de paie : brut ${eur2(PAIE_REF.brut)}, ONSS patronal net ${eur2(PAIE_REF.onss)}, chèques-repas ${eur2(PAIE_REF.cr)}.` : `Écart avec le journal de paie d’octobre (brut ${eur2(PAIE_REF.brut)}, ONSS ${eur2(PAIE_REF.onss)}, chèques-repas ${eur2(PAIE_REF.cr)}) : les données ont été modifiées.`}</p>
@@ -169,11 +169,13 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
             <label className="as-row">Prime de fin d’année <NumIn value={rh.pfa} label="Prime de fin d’année en mois de brut" w={60} onChange={(v: number) => setRh({ ...rh, pfa: v })} /> mois, payée en
               <select aria-label="Mois de la prime de fin d’année" value={rh.moisPfa} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRh({ ...rh, moisPfa: +e.target.value })}>{MONTHS.map((m: string, i: number) => <option key={m} value={i + 1}>{m}</option>)}</select></label>
             <label className="as-row">ONSS patronal sur ces paiements <NumIn value={rh.onssExtraPct} label="Taux ONSS sur pécule et prime" w={60} onChange={(v: number) => setRh({ ...rh, onssExtraPct: v })} /> %</label>
+            <label className="as-row">Rémunération du dirigeant (618) <NumIn value={rh.gerance} label="Rémunération mensuelle du dirigeant" w={90} onChange={(v: number) => setRh({ ...rh, gerance: v })} /> € / mois HTVA</label>
+            <label className="as-row">Droits d’auteur (61) <NumIn value={rh.droits} label="Droits d’auteur annuels" w={100} onChange={(v: number) => setRh({ ...rh, droits: v })} /> € / an, lissés sur les mois</label>
             <label className="as-chk"><input type="checkbox" checked={rh.prorata} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRh({ ...rh, prorata: e.target.checked })} />Prorata des jours en cas d’entrée ou de sortie en cours de mois</label>
           </div>
           {fromSel}
           <p className="bd-hint">Coefficient annuel (CP 220) : 12 + {nf2.format(rh.dp)} + {nf2.format(rh.pfa)} = <b>{nf2.format(coefAnnuel(rh))} mois</b> de brut. Le surcoût (≈ {nf2.format((coefAnnuel(rh) - 12) / 12 * 100)} % du brut) est provisionné chaque mois (625020) et repris lors du paiement (625120), comme dans le grand livre. Le taux d’ONSS sur ces paiements est le taux brut du journal : 2.576,17 € / 9.509,97 € = 27,09 %.</p>
-          <div className="as-act"><button type="button" className="bd-btn primary" disabled={ro} onClick={doRh}>Appliquer au budget</button><span className="as-tot">Coût annuel estimé de la classe 62 (périmètre de l’assistant) : <b>{eur0(rhPreview)}</b></span></div>
+          <div className="as-act"><button type="button" className="bd-btn primary" disabled={ro} onClick={doRh}>Appliquer au budget</button><span className="as-tot">Total RH + direction ({year}, à partir de {monthsLbl(from)}) : <b>{eur0(rhPreview)}</b>{from === 1 && year === 2027 ? <> · référence annoncée ≈ {eur0(TOTAL_RH_2027_REF)} (suppose Noah présent toute l’année ; son contrat se termine le 12/09/2027)</> : null}</span></div>
         </div>
       ) : null}
 
