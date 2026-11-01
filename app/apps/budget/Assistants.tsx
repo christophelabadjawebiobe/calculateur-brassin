@@ -53,7 +53,7 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
     try {
       const s = JSON.parse(localStorage.getItem(STORE) || 'null');
       if (s && typeof s === 'object') {
-        if (Array.isArray(s.emps) && s.emps.length) setEmps([...(s.emps as Employee[]), ...EMPLOYEES.filter((d: Employee) => !(s.emps as Employee[]).some((x: Employee) => x.id === d.id)).map((d: Employee) => ({ ...d }))]);
+        if (Array.isArray(s.emps) && s.emps.length) setEmps([...(s.emps as Employee[]).map((x: Employee) => (x.id === 'herman' && x.start === '2027-01-01' ? { ...x, start: '2016-01-01', end: '2026-12-31' } : x)), ...EMPLOYEES.filter((d: Employee) => !(s.emps as Employee[]).some((x: Employee) => x.id === d.id)).map((d: Employee) => ({ ...d }))]);
         if (s.rh) setRh((cur: RhParams) => ({ ...RH_DEFAULTS, ...s.rh, gerance: cur.gerance, droits: cur.droits }));
         if (typeof s.ratio === 'number') setRatio(s.ratio);
         if (Array.isArray(s.fixed) && s.fixed.length) setFixed(fixedDefaults().map((d: FixedLine) => (s.fixed as FixedLine[]).find((x: FixedLine) => x.code === d.code) || d));
@@ -169,13 +169,13 @@ export default function Assistants({ rows, year, ro, onApply, onClose }: Props) 
             <label className="as-row">Prime de fin d’année <NumIn value={rh.pfa} label="Prime de fin d’année en mois de brut" w={60} onChange={(v: number) => setRh({ ...rh, pfa: v })} /> mois, payée en
               <select aria-label="Mois de la prime de fin d’année" value={rh.moisPfa} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRh({ ...rh, moisPfa: +e.target.value })}>{MONTHS.map((m: string, i: number) => <option key={m} value={i + 1}>{m}</option>)}</select></label>
             <label className="as-row">ONSS patronal sur ces paiements <NumIn value={rh.onssExtraPct} label="Taux ONSS sur pécule et prime" w={60} onChange={(v: number) => setRh({ ...rh, onssExtraPct: v })} /> %</label>
-            <label className="as-row">Rémunération du dirigeant (618) <NumIn value={rh.gerance} label="Rémunération mensuelle du dirigeant" w={90} onChange={(v: number) => setRh({ ...rh, gerance: v })} /> € / mois HTVA</label>
-            <label className="as-row">Droits d’auteur (61) <NumIn value={rh.droits} label="Droits d’auteur annuels" w={100} onChange={(v: number) => setRh({ ...rh, droits: v })} /> € / an, lissés sur les mois</label>
+            <label className="as-row">Consultance management / dirigeant (618) <NumIn value={rh.gerance} label="Rémunération mensuelle du dirigeant" w={90} onChange={(v: number) => setRh({ ...rh, gerance: v })} /> € / mois HTVA</label>
+            <label className="as-row">Droits d’auteur (consultance externe) <NumIn value={rh.droits} label="Droits d’auteur annuels" w={100} onChange={(v: number) => setRh({ ...rh, droits: v })} /> € / an, lissés sur les mois</label>
             <label className="as-chk"><input type="checkbox" checked={rh.prorata} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRh({ ...rh, prorata: e.target.checked })} />Prorata des jours en cas d’entrée ou de sortie en cours de mois</label>
           </div>
           {fromSel}
           <p className="bd-hint">Coefficient annuel (CP 220) : 12 + {nf2.format(rh.dp)} + {nf2.format(rh.pfa)} = <b>{nf2.format(coefAnnuel(rh))} mois</b> de brut. Le surcoût (≈ {nf2.format((coefAnnuel(rh) - 12) / 12 * 100)} % du brut) est provisionné chaque mois (625020) et repris lors du paiement (625120), comme dans le grand livre. Le taux d’ONSS sur ces paiements est le taux brut du journal : 2.576,17 € / 9.509,97 € = 27,09 %.</p>
-          <div className="as-act"><button type="button" className="bd-btn primary" disabled={ro} onClick={doRh}>Appliquer au budget</button><span className="as-tot">Total RH + direction ({year}, à partir de {monthsLbl(from)}) : <b>{eur0(rhPreview)}</b>{from === 1 && year === 2027 ? <> · référence annoncée ≈ {eur0(TOTAL_RH_2027_REF)} (suppose Noah présent toute l’année ; son contrat se termine le 12/09/2027)</> : null}</span></div>
+          <div className="as-act"><button type="button" className="bd-btn primary" disabled={ro} onClick={doRh}>Appliquer au budget</button><span className="as-tot">Total RH + direction ({year}, à partir de {monthsLbl(from)}) : <b>{eur0(rhPreview)}</b>{from === 1 && year === 2027 ? <> · référence ≈ {eur0(TOTAL_RH_2027_REF)} (4 salariés ≈ 165.034 € + consultance 72.000 € + droits d’auteur 50.000 € ; Noah présent toute l’année, contrat jusqu’en septembre 2028)</> : null}</span></div>
         </div>
       ) : null}
 
