@@ -1,7 +1,8 @@
 // lib/defaults.ts : données et calculs par défaut du Budget (RH, répartition du CA par secteur, achats 60, charges fixes 61).
 // Fonctions pures, sans dépendance au navigateur : elles sont utilisées par app/apps/budget/Assistants.tsx.
-import { CHART, Z12, accMonths, cloneEntry, emptyEntry, r2, secAccKeys, uid, type Entry, type Plan, type Sub } from './pcmn';
-import { CA_MONTHLY, FIXED_61, RATIOS_60, S60_SHARES } from './defaults-data';
+import { CHART, Z12, accMonths, cloneEntry, emptyEntry, r2, secAccKeys, sum, uid, type Entry, type Plan, type Sub } from './pcmn';
+import { DROITS_KEY, GERANCE_KEY } from './projection';
+import { ACTUAL_2026, CA_MONTHLY, FIXED_61, RATIOS_60, S60_SHARES } from './defaults-data';
 
 /* ======================================================================
    1. RH & masse salariale (journal de paie UCM n°20, octobre 2026)
@@ -24,7 +25,17 @@ export const EMPLOYEES: Employee[] = [
   { id: 'verleyen', name: 'Sébastien VERLEYEN', role: 'Responsable Production', regime: '38h/38h (temps plein)', start: '2021-01-04', end: null, brut: 3148.32, atn: 0, onss: 696.69, transport: 75.78, titres: 21, crPart: 6.91, telework: 0, repres: 0, extras: true },
   { id: 'mention', name: 'Noah MENTION', role: 'Assistant Sales Management / Master', regime: '22h/38h (apprenti)', start: '2026-09-14', end: '2027-09-12', brut: 1301.28, atn: 0, onss: 119.42, transport: 0, titres: 0, crPart: 6.91, telework: 0, repres: 0, extras: true },
   { id: 'urgyan', name: 'Vanessa URGYAN', role: 'Déléguée commerciale', regime: '30h/38h (temps partiel)', start: '2026-10-01', end: null, brut: 2205.36, atn: 3, onss: 356.47, transport: 0, titres: 18, crPart: 6.91, telework: 130, repres: 90, extras: true },
+  // Direction : référentiel 2027 (date d'entrée à confirmer). « Déplacements » = frais, ATN et assurances (287,13 €).
+  { id: 'herman', name: 'Stanislas HERMAN', role: 'Directeur', regime: '38h/38h (temps plein)', start: '2027-01-01', end: null, brut: 3151.42, atn: 0, onss: 861.29, transport: 287.13, titres: 20, crPart: 6.91, telework: 0, repres: 0, extras: true },
 ];
+/** Les 4 contrats du journal de paie n°20 (le directeur n'y figure pas) */
+export const JOURNAL_IDS = ['botty', 'verleyen', 'mention', 'urgyan'];
+/** Référentiel 2027 : rémunération du dirigeant (compte 618) et droits d'auteur (compte 61) */
+export const GERANCE_MENSUEL = 6000;
+export const DROITS_ANNUEL = 50000;
+/** Total annuel de référence RH + direction annoncé pour 2027 (≈ 348.000 €) */
+export const TOTAL_RH_2027_REF = 348000;
+export { GERANCE_KEY, DROITS_KEY };
 /** Totaux de référence du journal de paie n°20 (4 contrats, mois complet) */
 export const PAIE_REF = { brut: 9509.97, onss: 1531.98, cr: 414.6 };
 
@@ -36,8 +47,10 @@ export type RhParams = {
   moisPfa: number;       // mois de paiement de la prime de fin d'année
   onssExtraPct: number;  // ONSS patronal brut sur ces paiements (%) : 2.576,17 / 9.509,97 = 27,09 %
   prorata: boolean;      // prorata des jours pour les entrées/sorties en cours de mois
+  gerance: number;       // rémunération mensuelle du dirigeant (compte 618000)
+  droits: number;        // droits d'auteur, montant annuel lissé (compte 613400)
 };
-export const RH_DEFAULTS: RhParams = { from: 1, dp: 0.92, pfa: 1, moisDp: 5, moisPfa: 12, onssExtraPct: 27.09, prorata: true };
+export const RH_DEFAULTS: RhParams = { from: 1, dp: 0.92, pfa: 1, moisDp: 5, moisPfa: 12, onssExtraPct: 27.09, prorata: true, gerance: GERANCE_MENSUEL, droits: DROITS_ANNUEL };
 /** coefficient annuel (12 mois + double pécule + prime de fin d'année), ≈ 13,92 */
 export const coefAnnuel = (p: Pick<RhParams, 'dp' | 'pfa'>) => r2(12 + p.dp + p.pfa);
 
@@ -46,6 +59,7 @@ export const RH_ACCOUNTS: [string, string][] = [
   ['620201', 'Rémunérations employés'], ['620221', 'ATN GSM'], ['740221', 'Récupération ATN GSM'],
   ['625020', 'Provision pécule de vacances et prime (dotation)'], ['620204', 'Double pécule'], ['620205', 'Prime de fin d’année'], ['625120', 'Utilisation / reprise de provision'],
   ['621020', 'ONSS patronal'], ['623100', 'Frais de déplacement'], ['623210', 'Chèques-repas (part patronale)'], ['623280', 'Forfait télétravail'], ['623270', 'Frais de représentation'],
+  ['618000', 'Rémunération du dirigeant (gérance)'], ['613400', 'Droits d’auteur'],
 ];
 
 const dim = (y: number, m: number) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
@@ -88,7 +102,7 @@ export function employeeMonths(e: Employee, year: number, p: RhParams): Record<s
 /** Totaux mensuels « de référence » (mois complet, tous les contrats actifs) : à comparer à PAIE_REF */
 export function monthlyReference(list: Employee[]) {
   const t = { brut: 0, onss: 0, cr: 0 };
-  list.forEach((e) => { t.brut += e.brut; t.onss += e.onss; t.cr += e.titres * e.crPart; });
+  list.filter((e) => JOURNAL_IDS.includes(e.id)).forEach((e) => { t.brut += e.brut; t.onss += e.onss; t.cr += e.titres * e.crPart; });
   return { brut: r2(t.brut), onss: r2(t.onss), cr: r2(t.cr) };
 }
 
@@ -106,6 +120,11 @@ export function applyRh(rows: Record<string, Entry>, list: Employee[], year: num
     for (const { e, m } of perEmp) {
       const months = m[key].map((v, i) => (i >= p.from - 1 ? v : 0));
       if (months.some((v) => Math.abs(v) >= 0.005)) subs.push({ id: uid(), label: e.name, mode: 'monthly', annual: 0, months });
+    }
+    if (key === GERANCE_KEY && p.gerance) subs.push({ id: uid(), label: 'Dirigeant (gérance)', mode: 'monthly', annual: 0, months: Z12().map((_, i) => (i >= p.from - 1 ? r2(p.gerance) : 0)) });
+    if (key === DROITS_KEY && p.droits) {
+      const n = 13 - p.from; const arr = splitAmount(p.droits * n / 12, Array(n).fill(1));
+      subs.push({ id: uid(), label: 'Droits d’auteur (lissés)', mode: 'monthly', annual: 0, months: [...Array(p.from - 1).fill(0), ...arr] });
     }
     const hadSomething = Math.abs(before.reduce((a, b) => a + b, 0)) >= 0.005 || e0.subs.length > 0;
     if (!subs.length && !hadSomething) continue;
@@ -228,5 +247,50 @@ export function applyFixed(rows: Record<string, Entry>, lines: FixedLine[], from
   return { rows: next, n };
 }
 
+/* ======================================================================
+   5. Atterrissage 2026 : 10 mois réels du grand livre + 2 mois extrapolés
+   ====================================================================== */
+export const ATTERRISSAGE_2026 = { caReel10: 302781.46, caTotal: 380560 };
+
+/** Plan 2026 complet : janv.–oct. = réalisé comptable ; nov.–déc. = extrapolation (CA total 380.560 €, achats au ratio réel, RH de la paie, charges fixes récurrentes, moyenne pour le reste) */
+export function buildAtterrissage2026(list: Employee[] = EMPLOYEES): { rows: Record<string, Entry>; ca: number; caReel: number } {
+  const monthsOf = (k: string): number[] => (ACTUAL_2026[k] || Array(10).fill(0)).concat([0, 0]);
+  const rows: Record<string, Entry> = {};
+  const secOf: Record<string, string> = {};
+  CHART.forEach((sec) => secAccKeys(sec).forEach((k) => { secOf[k] = sec.k; }));
+  const s70 = secAccKeys(CHART.find((s) => s.k === 's70')!);
+  const caReel = r2(s70.reduce((a, k) => a + sum((ACTUAL_2026[k] || []).slice(0, 10)), 0));
+  const rest = r2(ATTERRISSAGE_2026.caTotal - caReel);
+  const [nov, dec] = splitAmount(rest, [CA_MONTHLY[2025][10], CA_MONTHLY[2025][11]]);
+  const ratio = (RATIOS_60.find((r) => r.year === 2026)?.pct ?? RATIO_60_DEFAULT) / 100;
+  const share: Record<string, number> = {}; S60_SHARES.forEach(([k, w]) => { share[k] = w; });
+  const rh: Record<string, number[]> = {}; RH_ACCOUNTS.forEach(([k]) => { rh[k] = Z12(); });
+  const params: RhParams = { ...RH_DEFAULTS, from: 11, gerance: 0, droits: 0 };
+  list.forEach((e) => { const m = employeeMonths(e, 2026, params); RH_ACCOUNTS.forEach(([k]) => { m[k].forEach((v, i) => { rh[k][i] += v; }); }); });
+  const fixed: Record<string, number> = {}; FIXED_61.forEach((f) => { if (f.rec) fixed[f.code] = f.monthly; });
+  const caM = Z12(); // CA mensuel du plan (réel puis extrapolé)
+  s70.forEach((k) => monthsOf(k).forEach((v, i) => { caM[i] += v; }));
+  caM[10] += nov; caM[11] += dec;
+  const keys = new Set<string>([...Object.keys(ACTUAL_2026), ...Object.keys(rh).filter((k) => sum(rh[k]) !== 0), '701000']);
+  keys.forEach((k) => {
+    const m = monthsOf(k); const sec = secOf[k]; if (!sec) return;
+    const act = m.slice(0, 10); const active = act.filter((v) => Math.abs(v) >= 0.005).length; const avg = sum(act) / 10;
+    let n: number, d: number;
+    if (k === '701000') { n = nov; d = dec; }
+    else if (sec === 's70') { n = 0; d = 0; }
+    else if (rh[k] && sum(rh[k]) !== 0) { n = rh[k][10]; d = rh[k][11]; }
+    else if (k === '749030' || k === '749050' || k === '621900') { n = 0; d = 0; }
+    else if (sec === 's60') { const w = isStockAccount(k) ? 0 : share[k] || 0; n = caM[10] * ratio * w; d = caM[11] * ratio * w; }
+    else if (fixed[k] !== undefined) { n = fixed[k]; d = fixed[k]; }
+    else if (isStockAccount(k) || active < 5) { n = 0; d = 0; }
+    else { n = avg; d = avg; }
+    const months = act.concat([r2(n), r2(d)]);
+    rows[k] = { mode: 'monthly', annual: 0, months, subs: [] };
+  });
+  // comptes à alimenter même sans réalisé (achats de la structure réelle, charges fixes) : seulement nov.–déc.
+  S60_SHARES.forEach(([k, w]) => { if (!rows[k]) rows[k] = { mode: 'monthly', annual: 0, months: [...Array(10).fill(0), r2(caM[10] * ratio * w), r2(caM[11] * ratio * w)], subs: [] }; });
+  return { rows, ca: r2(sum(caM)), caReel };
+}
+
 export type { Plan };
-export { CA_MONTHLY, FIXED_61, RATIOS_60, S60_SHARES };
+export { ACTUAL_2026, CA_MONTHLY, FIXED_61, RATIOS_60, S60_SHARES };
