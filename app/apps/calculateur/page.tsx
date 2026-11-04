@@ -2458,6 +2458,9 @@ export default function CalculateurPage() {
     let rl: string | null = null;
     try { const { data } = await supabase.from('profiles').select('role').eq('id', u.id).maybeSingle(); rl = data && data.role; } catch (e) { /* ignore */ }
     if (!rl) { const meta = u.user_metadata || {}; rl = meta.role; }
+    if (rl && rl !== 'admin') { // rôles personnalisés : le niveau d'accès « calculateur » (sql/05) décide : modification = brasseur, sinon lecture seule
+      try { const lv = await supabase.rpc('app_level', { p_app: 'calculateur' }); if (!lv.error && (lv.data === 'write' || lv.data === 'read' || lv.data === 'none')) return lv.data === 'write' ? 'brasseur' : 'user'; } catch (e) { /* fonction absente : ancien comportement */ }
+    }
     return ROLES[rl as string] ? (rl as string) : 'user';
   };
   async function loadRole() {

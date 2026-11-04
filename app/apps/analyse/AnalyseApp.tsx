@@ -61,11 +61,13 @@ export default function AnalyseApp({ canEdit }: { canEdit: boolean }) {
     try {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth || !auth.user) { routerRef.current.replace('/login?next=/apps/analyse'); return; }
-      const [a, h, p] = await Promise.all([
+      let [a, h, p]: any[] = await Promise.all([
         fetchAll((x, y) => supabase.from('pcmn_actuals').select('account_key,year,month,amount').range(x, y)),
         fetchAll((x, y) => supabase.from('pcmn_budget_history').select('account_key,year,amount').range(x, y)),
-        supabase.from('pcmn_budget_plans').select('year,data,validated_data,validated_at'),
+        supabase.from('pcmn_budget_plans').select('year,scenario,is_locked,data,validated_data,validated_at'),
       ]);
+      // sans sql/06 (colonnes scenario / is_locked absentes) : une année = un budget
+      if (p.error && /scenario|is_locked/i.test(p.error.message || '')) p = await supabase.from('pcmn_budget_plans').select('year,data,validated_data,validated_at');
       const err = a.error || h.error || p.error;
       setNotice(err ? (/relation|does not exist|schema cache|validated/i.test(err.message || '') ? 'Tables manquantes : exécutez sql/02_budget_pcmn.sql puis sql/04_admin_reel_validation.sql dans Supabase (SQL Editor), puis rechargez la page.' : 'Chargement impossible : ' + err.message) : '');
       const A: Actuals = {}, M: Record<number, Set<number>> = {};
@@ -73,7 +75,11 @@ export default function AnalyseApp({ canEdit }: { canEdit: boolean }) {
       const H: Record<string, Record<number, number>> = {};
       h.data.forEach((r: any) => { (H[r.account_key] = H[r.account_key] || {})[r.year] = Number(r.amount); });
       const P: Record<number, PlanRow> = {};
-      ((p.data || []) as any[]).forEach((r) => { P[r.year] = { year: r.year, data: r.data ? normPlan(r.data) : null, validated_data: r.validated_data ? normPlan(r.validated_data) : null, validated_at: r.validated_at || null }; });
+      // un seul budget par année : verrouillé (validé) > scénario « base » > premier trouvé
+      const rank = (r: any): number => (r.is_locked ? 2 : 0) + (r.scenario === undefined || r.scenario === 'base' ? 1 : 0);
+      const best: Record<number, any> = {};
+      ((p.data || []) as any[]).forEach((r: any) => { if (!best[r.year] || rank(r) > rank(best[r.year])) best[r.year] = r; });
+      Object.values(best).forEach((r: any) => { P[r.year] = { year: r.year, data: r.data ? normPlan(r.data) : null, validated_data: r.validated_data ? normPlan(r.validated_data) : null, validated_at: r.validated_at || null }; });
       setAct(A); setActMonths(M); setHist(H); setPlans(P);
       setYear((y) => y ?? (Object.keys(A).length ? Math.max(...Object.keys(A).map(Number)) : Object.keys(P).length ? Math.max(...Object.keys(P).map(Number)) : 2026));
     } catch (e: any) { setNotice('Chargement impossible : ' + (e && e.message ? e.message : 'erreur réseau')); }
