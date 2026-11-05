@@ -1,0 +1,98 @@
+import http from 'node:http';
+import { odooSignSend, Odoo, OdooError } from '../budget-analyse/lib/cooperateurs/connectors';
+
+type Mode = { sendOk: boolean; hasActionSent: boolean; hasSendAccess: boolean; items: number[]; failSendMsg?: string };
+const mode: Mode = { sendOk: true, hasActionSent: true, hasSendAccess: false, items: [1, 2] };
+const DB: any = { partners: [{ id: 10, name: 'Odile Existante', email: 'odile_ex@x.be' }, { id: 11, name: 'Sans Mail', email: false }], requests: {} as any, nextP: 100, nextR: 500, log: [] as any[] };
+const DOES = (m: string, meth: string) => ({ jsonrpc: '2.0', id: 1, error: { code: 200, message: 'Odoo Server Error', data: { name: 'builtins.AttributeError', message: `The method '${m}.${meth}' does not exist` } } });
+const ERR = (name: string, message: string) => ({ jsonrpc: '2.0', id: 1, error: { code: 200, message: 'Odoo Server Error', data: { name, message, debug: 'Traceback...' } } });
+function exec(model: string, method: string, args: any[], kw: any): any {
+  DB.log.push([model, method, JSON.stringify(args), JSON.stringify(kw)]);
+  if (method.startsWith('_')) return ERR('odoo.exceptions.AccessError', 'Private methods cannot be called remotely');
+  switch (model + '.' + method) {
+    case 'res.partner.search': {
+      const dom = args[0]; const em = dom.find((x: any) => x[0] === 'email' && x[1] === '=ilike'); const nm = dom.find((x: any) => x[0] === 'name'); const noem = dom.find((x: any) => x[0] === 'email' && x[1] === '=');
+      const unesc = (s: string) => s.replace(/\\(.)/g, '$1').toLowerCase();
+      if (em) return { result: DB.partners.filter((p: any) => p.email && p.email.toLowerCase() === unesc(em[2])).map((p: any) => p.id) };
+      if (nm && noem) return { result: DB.partners.filter((p: any) => !p.email && p.name.toLowerCase() === unesc(nm[2])).map((p: any) => p.id) };
+      return { result: [] };
+    }
+    case 'res.partner.create': { const id = DB.nextP++; DB.partners.push({ id, ...args[0] }); return { result: id }; }
+    case 'res.partner.write': { Object.assign(DB.partners.find((p: any) => p.id === args[0][0]), args[1]); return { result: true }; }
+    case 'sign.template.search': return { result: [5] };
+    case 'sign.template.read': return { result: args[0][0] === 5 ? [{ id: 5, name: 'Bulletin de souscription', sign_item_ids: mode.items }] : [] };
+    case 'sign.item.read': return { result: args[0].map((i: number) => ({ id: i, responsible_id: [3, 'Customer'] })) };
+    case 'sign.item.role.read': return { result: args[0].map((i: number) => ({ id: i, name: 'Customer' })) };
+    case 'sign.request.fields_get': return { result: { template_id: {}, reference: {}, request_item_ids: {}, subject: {}, message: {}, state: {} } };
+    case 'sign.request.item.fields_get': return { result: { partner_id: {}, role_id: {} } };
+    case 'sign.request.initialize_new': return DOES('sign.request', 'initialize_new');
+    case 'sign.request.create': {
+      const v = args[0]; if (!v.template_id || !Array.isArray(v.request_item_ids) || !v.request_item_ids.every((t: any) => t[0] === 0 && t[1] === 0 && t[2].partner_id && t[2].role_id)) return ERR('odoo.exceptions.ValidationError', 'A sign request needs at least one valid sign request item.');
+      const id = DB.nextR++; DB.requests[id] = { id, state: 'draft', ...v }; return { result: id };
+    }
+    case 'sign.request.read': { const r = DB.requests[args[0][0]]; return r ? { result: [{ id: r.id, state: r.state }] } : ERR('odoo.exceptions.MissingError', 'Record does not exist or has been deleted.'); }
+    case 'sign.request.action_sent': {
+      if (!mode.hasActionSent) return DOES('sign.request', 'action_sent');
+      if (!args[0].length) return { result: true };
+      if (!mode.sendOk) return ERR('odoo.exceptions.ValidationError', mode.failSendMsg || 'Mail server down');
+      DB.requests[args[0][0]].state = 'sent'; return { result: true };
+    }
+    case 'sign.request.send_signature_accesses': {
+      if (!mode.hasSendAccess) return DOES('sign.request', 'send_signature_accesses');
+      if (args[0].length) DB.requests[args[0][0]].state = 'sent'; return { result: true };
+    }
+  }
+  return DOES(model, method);
+}
+const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
+  const { params } = JSON.parse(b); let out: any;
+  if (params.service === 'common' && params.method === 'authenticate') out = { result: 7 };
+  else if (params.service === 'common' && params.method === 'version') out = { result: { server_version: '18.0' } };
+  else { const [, , , model, method, a, kw] = params.args; out = exec(model, method, a, kw); }
+  res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, ...out }));
+}); });
+
+let fail = 0; const ok = (c: any, m: string) => { console.log((c ? 'OK  ' : 'FAIL') + ' ' + m); if (!c) fail++; };
+(async () => {
+  await new Promise<void>((r) => srv.listen(8791, r));
+  process.env.ODOO_URL = 'http://127.0.0.1:8791'; process.env.ODOO_API_KEY = 'k'; process.env.ODOO_DB = 'db'; process.env.ODOO_USER = 'u'; process.env.ODOO_SIGN_TEMPLATE_ID = '5';
+  const dem: any = { id: 'd1', nom: 'Dupont', prenom: 'Jean_Marc', email: 'jean_marc.dupont@x.be', telephone: '0470 1' };
+  // A. cas nominal (v18 : initialize_new n'existe pas)
+  let r: any = await odooSignSend(dem);
+  const req = DB.requests[r.requestId];
+  ok(r.ok && r.requestId === '500', 'A. demande créée et envoyée : n° ' + r.requestId + ' · ' + r.message);
+  ok(req.state === 'sent' && r.etat === 'sent' && r.methode === 'action_sent', 'A. état « sent » après action_sent');
+  ok(req.reference === 'Souscription La Badjawe - Jean_Marc Dupont' && req.template_id === 5, 'A. reference + template_id : ' + req.reference);
+  ok(JSON.stringify(req.request_item_ids) === JSON.stringify([[0, 0, { partner_id: 100, role_id: 3 }]]), 'A. request_item_ids = [(0,0,{partner_id, role_id})] : ' + JSON.stringify(req.request_item_ids));
+  ok(DB.partners.find((p: any) => p.id === 100).email === 'jean_marc.dupont@x.be', 'A. partenaire créé (inexistant)');
+  ok(!DB.log.some((l: any) => l[1] === 'initialize_new') && !DB.log.some((l: any) => l[1].startsWith('_')), 'A. ni initialize_new ni méthode privée appelée');
+  const srch = DB.log.find((l: any) => l[0] === 'res.partner' && l[1] === 'search' && /=ilike/.test(l[2])); ok(/jean\\\\_marc/.test(srch[2]), 'A. « _ » de l’e-mail échappé dans =ilike : ' + srch[2]);
+  // E. partenaire existant par e-mail ; et par nom sans e-mail (complété)
+  const p1 = await new Odoo().partner({ nom: 'Existante', prenom: 'Odile', email: 'ODILE_ex@x.be' }); ok(p1 === 10, 'E. partenaire retrouvé par e-mail (casse ignorée) : ' + p1);
+  const p2 = await new Odoo().partner({ nom: 'Mail', prenom: 'Sans', email: 'sans@x.be', telephone: '04' }); ok(p2 === 11 && DB.partners.find((p: any) => p.id === 11).email === 'sans@x.be', 'E. partenaire sans e-mail retrouvé par nom puis complété');
+  // B. échec à l'envoi : demande créée, n° conservé, message exact d'Odoo ; reprise sans doublon
+  mode.sendOk = false; mode.failSendMsg = 'Impossible de joindre le serveur de courrier sortant';
+  const avant = Object.keys(DB.requests).length; let err: any;
+  try { await odooSignSend({ ...dem, email: 'b@x.be', nom: 'Bis' }); } catch (e) { err = e; }
+  ok(err instanceof OdooError && err.requestId === '501', 'B. OdooError avec n° de la demande créée : ' + (err && err.requestId));
+  ok(/\[odoo\.exceptions\.ValidationError\] Impossible de joindre le serveur de courrier sortant/.test(err.message) && /envoi/.test(err.message), 'B. message exact RPC + étape : ' + err.message);
+  ok(!/Traceback/.test(err.message), 'B. pas de trace serveur dans le message');
+  mode.sendOk = true; const r2: any = await odooSignSend({ ...dem, email: 'b@x.be', nom: 'Bis', odoo_sign_request_id: '501' });
+  ok(r2.ok && r2.requestId === '501' && Object.keys(DB.requests).length === avant + 1 && DB.requests[501].state === 'sent', 'B. reprise : envoi relancé sans nouvelle demande');
+  // F. demande annulée : nouvelle création
+  DB.requests[501].state = 'canceled'; const r3: any = await odooSignSend({ ...dem, email: 'b@x.be', nom: 'Bis', odoo_sign_request_id: '501' }); ok(r3.requestId === '502', 'F. ancienne demande annulée : nouvelle demande ' + r3.requestId);
+  // C. aucune méthode d'envoi : échec AVANT toute création
+  mode.hasActionSent = false; const n0 = Object.keys(DB.requests).length; err = null;
+  try { await odooSignSend({ ...dem, email: 'c@x.be', nom: 'C' }); } catch (e) { err = e; }
+  ok(err && /aucune méthode d'envoi publique/.test(err.message) && Object.keys(DB.requests).length === n0, 'C. aucune méthode d’envoi : erreur claire, rien créé : ' + (err && err.message.slice(0, 120)));
+  mode.hasSendAccess = true; const r4: any = await odooSignSend({ ...dem, email: 'c@x.be', nom: 'C' }); ok(r4.ok && r4.methode === 'send_signature_accesses', 'C. repli sur send_signature_accesses');
+  mode.hasActionSent = true; mode.hasSendAccess = false;
+  process.env.ODOO_SIGN_SEND_METHOD = '_private'; err = null; try { await odooSignSend({ ...dem, email: 'd@x.be', nom: 'D' }); } catch (e) { err = e; } ok(err && /méthode privée/.test(err.message), 'C. ODOO_SIGN_SEND_METHOD privée refusée'); delete process.env.ODOO_SIGN_SEND_METHOD;
+  // D. modèle sans champ à signer
+  mode.items = []; err = null; try { await odooSignSend({ ...dem, email: 'e@x.be', nom: 'E' }); } catch (e) { err = e; } ok(err && /aucun champ à signer/.test(err.message), 'D. modèle vide : message explicite'); mode.items = [1, 2];
+  // G. modèle introuvable
+  process.env.ODOO_SIGN_TEMPLATE_ID = '99'; err = null; try { await odooSignSend({ ...dem, email: 'f@x.be', nom: 'F' }); } catch (e) { err = e; } ok(err && /modèle n° 99 introuvable/.test(err.message), 'G. modèle introuvable'); process.env.ODOO_SIGN_TEMPLATE_ID = '5';
+  // H. garde méthode privée dans le client
+  err = null; try { await new Odoo().call('sign.request', '_initialize_new', []); } catch (e: any) { err = e; } ok(err && /privée/.test(err.message), 'H. le client refuse toute méthode privée');
+  srv.close(); console.log(fail ? 'ÉCHECS : ' + fail : 'TOUS OK'); process.exit(fail ? 1 : 0);
+})();
